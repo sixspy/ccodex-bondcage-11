@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from auth import AuthHeader, require_user, require_writer
 from db import connect, now_iso, write_audit
 from locks import release, require_lock
+from merge_svc import live_frozen_sum
 from models import BondOpenIn, DepositIn
 
 router = APIRouter(tags=["bonds"])
@@ -18,7 +19,15 @@ def list_bonds(authorization: AuthHeader = None):
         rows = conn.execute(
             """SELECT * FROM bond_accounts ORDER BY id"""
         ).fetchall()
-        return {"items": [dict(r) for r in rows]}
+        items = []
+        for r in rows:
+            d = dict(r)
+            live = live_frozen_sum(conn, d["party_key"])
+            d["live_cage_available"] = live
+            d["frozen_aligned"] = abs(float(d["frozen"]) - live) < 1e-6
+            d["available_balance"] = round(float(d["balance"]) - float(d["frozen"]), 6)
+            items.append(d)
+        return {"items": items}
 
 
 @router.get("/api/bonds/{party_key}")
@@ -39,8 +48,15 @@ def get_bond(party_key: str, authorization: AuthHeader = None):
                FROM cages WHERE party_key=? ORDER BY id DESC""",
             (party_key,),
         ).fetchall()
+        live = live_frozen_sum(conn, party_key)
+        account = dict(row)
+        account["live_cage_available"] = live
+        account["frozen_aligned"] = abs(float(row["frozen"]) - live) < 1e-6
+        account["available_balance"] = round(
+            float(row["balance"]) - float(row["frozen"]), 6
+        )
         return {
-            "account": dict(row),
+            "account": account,
             "deposits": [dict(d) for d in deposits],
             "cages": [dict(c) for c in cages],
         }

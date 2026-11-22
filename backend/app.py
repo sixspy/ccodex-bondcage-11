@@ -14,6 +14,7 @@ from cages_svc import router as cages_router
 from db import FRONTEND, PRODUCT_META, init_db
 from forfeit_svc import router as forfeit_router
 from locks import router as locks_router
+from merge_svc import router as merge_router
 from reconcile_svc import router as reconcile_router
 from release_svc import router as release_router
 from split_svc import router as split_router
@@ -43,6 +44,7 @@ for r in (
     audit_router,
     topup_router,
     split_router,
+    merge_router,
 ):
     app.include_router(r)
 

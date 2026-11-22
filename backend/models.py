@@ -55,6 +55,14 @@ class SplitIn(BaseModel):
     mode: str = "整笔切分"
 
 
+class MergeIn(BaseModel):
+    party_key: str = Field(min_length=2, max_length=64)
+    contract_no: str = Field(min_length=2, max_length=64)
+    main_cage_id: int
+    source_cage_ids: list[int] = Field(min_length=1)
+    mode: str = "整笔同事务"
+
+
 class LockIn(BaseModel):
     lock_key: str
     action: str = "acquire"

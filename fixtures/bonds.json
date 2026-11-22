@@ -3,7 +3,7 @@
     "party_key": "P-EAST",
     "party_name": "东海工程有限公司",
     "balance": 500000,
-    "frozen": 120000,
+    "frozen": 300000,
     "status": "正常",
     "created_at": "2026-11-01T09:00:00"
   },

@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from auth import AuthHeader, require_user
-from db import connect
+from db import LIVE_CAGE_IN, LIVE_CAGE_STATUSES, MERGED_VOID_STATUS, connect
 
 router = APIRouter(tags=["reconcile"])
 
@@ -14,6 +14,40 @@ def _reconcile_cage(conn, cage) -> dict:
     gen = int(cage["generation"])
     amount = float(cage["amount"])
     available = float(cage["available"])
+
+    # 已合并作废笼：金额已在同事务并入主笼，按血缘单列，不计失衡
+    if cage["status"] == MERGED_VOID_STATUS:
+        lineage = conn.execute(
+            """SELECT l.*, j.main_cage_id, j.contract_no, m.cage_code AS main_cage_code
+               FROM merge_lineage l
+               JOIN merge_jobs j ON j.id=l.merge_job_id
+               JOIN cages m ON m.id=j.main_cage_id
+               WHERE l.source_cage_id=? ORDER BY l.id DESC LIMIT 1""",
+            (cage_id,),
+        ).fetchone()
+        return {
+            "cage_id": cage_id,
+            "cage_code": cage["cage_code"],
+            "party_key": cage["party_key"],
+            "contract_no": cage["contract_no"],
+            "generation": gen,
+            "status": cage["status"],
+            "amount": amount,
+            "available": 0.0,
+            "released": 0.0,
+            "forfeited": 0.0,
+            "accounted": amount,
+            "balanced": True,
+            "merged": True,
+            "gap": 0.0,
+            "merged_into": dict(lineage) if lineage else None,
+            "proof": {
+                "formula": "作废笼金额已整笔并入主笼（血缘见 merged_into）",
+                "left": amount,
+                "right": amount,
+            },
+        }
+
     released = conn.execute(
         """SELECT COALESCE(SUM(amount),0) s FROM releases
            WHERE cage_id=? AND status='已拨付' AND cage_generation=?""",
@@ -26,16 +60,16 @@ def _reconcile_cage(conn, cage) -> dict:
     ).fetchone()["s"]
     accounted = round(float(available) + float(released) + float(forfeited), 6)
     ok = abs(accounted - amount) < 1e-6
-    # 账户侧：该当事人冻结额应覆盖所有仍冻结/核验中的笼可用
+    # 账户侧：该当事人冻结额应覆盖所有仍冻结/核验中的笼可用（五页同源口径）
     party = cage["party_key"]
     acct = conn.execute(
         "SELECT balance, frozen FROM bond_accounts WHERE party_key=?",
         (party,),
     ).fetchone()
     live_frozen = conn.execute(
-        """SELECT COALESCE(SUM(available),0) s FROM cages
-           WHERE party_key=? AND status IN ('已冻结','核验通过','核验违约','部分解笼','部分罚没')""",
-        (party,),
+        f"""SELECT COALESCE(SUM(available),0) s FROM cages
+           WHERE party_key=? AND status IN ({LIVE_CAGE_IN})""",
+        (party, *LIVE_CAGE_STATUSES),
     ).fetchone()["s"]
     return {
         "cage_id": cage_id,
@@ -50,10 +84,13 @@ def _reconcile_cage(conn, cage) -> dict:
         "forfeited": float(forfeited),
         "accounted": accounted,
         "balanced": ok,
+        "merged": False,
         "gap": round(amount - accounted, 6),
         "account_balance": float(acct["balance"]) if acct else None,
         "account_frozen": float(acct["frozen"]) if acct else None,
         "live_cage_available": float(live_frozen),
+        "frozen_aligned": acct is not None
+        and abs(float(acct["frozen"]) - float(live_frozen)) < 1e-6,
         "proof": {
             "formula": "available + released + forfeited == amount（同笼代）",
             "left": accounted,
@@ -69,12 +106,14 @@ def reconcile_all(authorization: AuthHeader = None):
         cages = conn.execute("SELECT * FROM cages ORDER BY id").fetchall()
         items = [_reconcile_cage(conn, c) for c in cages]
         bad = [i for i in items if not i["balanced"]]
+        merged_n = sum(1 for i in items if i.get("merged"))
         return {
             "items": items,
             "summary": {
                 "total": len(items),
                 "balanced": len(items) - len(bad),
                 "unbalanced": len(bad),
+                "merged_void": merged_n,
             },
         }
 
@@ -102,10 +141,9 @@ def party_proof(party_key: str, authorization: AuthHeader = None):
         if not acct:
             raise HTTPException(404, "保证金户不存在")
         live = conn.execute(
-            """SELECT COALESCE(SUM(available),0) s FROM cages
-               WHERE party_key=? AND status IN
-               ('已冻结','核验通过','核验违约','部分解笼','部分罚没')""",
-            (party_key,),
+            f"""SELECT COALESCE(SUM(available),0) s FROM cages
+               WHERE party_key=? AND status IN ({LIVE_CAGE_IN})""",
+            (party_key, *LIVE_CAGE_STATUSES),
         ).fetchone()["s"]
         released = conn.execute(
             """SELECT COALESCE(SUM(r.amount),0) s FROM releases r

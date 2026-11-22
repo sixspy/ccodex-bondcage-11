@@ -25,8 +25,10 @@ PRODUCT_META = {
         "audit",
         "topup",
         "split",
+        "merge",
     ],
     "stubs": ["topup_cage", "split_cage"],
+    "merge_path": "甲路径·整笔同事务（乙路径桥接影子晋升禁用，见 docs/multi-cage-merge-minutes.md）",
 }
 
 
@@ -159,7 +161,40 @@ CREATE TABLE IF NOT EXISTS deposit_ledger(
   created_at TEXT NOT NULL,
   actor TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS merge_jobs(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  party_key TEXT NOT NULL,
+  contract_no TEXT NOT NULL,
+  main_cage_id INTEGER NOT NULL,
+  mode TEXT NOT NULL,
+  merged_amount REAL NOT NULL,
+  status TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  detail TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS merge_lineage(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  merge_job_id INTEGER NOT NULL,
+  source_cage_id INTEGER NOT NULL,
+  source_cage_code TEXT NOT NULL,
+  amount REAL NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(merge_job_id) REFERENCES merge_jobs(id)
+);
 """
+
+# 活笼状态集合：参与账户冻结合计与对账；作废/影子态不纳入。
+LIVE_CAGE_STATUSES = (
+    "已冻结",
+    "核验通过",
+    "核验违约",
+    "部分解笼",
+    "部分罚没",
+)
+LIVE_CAGE_IN = ",".join("?" for _ in LIVE_CAGE_STATUSES)
+MERGED_VOID_STATUS = "已合并作废"
+SHADOW_STATUS = "影子待晋升"
 
 
 def write_audit(conn: sqlite3.Connection, actor: str, action: str, target: str, payload: dict) -> None:

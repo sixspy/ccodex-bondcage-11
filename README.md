@@ -23,13 +23,23 @@
 | 项 | 内容 |
 |----|------|
 | 业务 LOC | **≥2900**（py+前端，不含 vue.global / Docker / README；自检约 2984） |
-| 后端模块 | db / auth / locks / bonds_svc / cages_svc / attest_svc / release_svc / forfeit_svc / reconcile_svc / audit_svc / topup_svc / split_svc |
-| 前端视图 | 保证金户 / 入笼冻结 / 履约核验 / 解笼拨付 / 罚没册 / 对账互证 / 审计争用 / 增补拆笼空桩（8 页） |
+| 后端模块 | db / auth / locks / bonds_svc / cages_svc / attest_svc / release_svc / forfeit_svc / reconcile_svc / audit_svc / topup_svc / split_svc / merge_svc |
+| 前端视图 | 保证金户 / 入笼冻结（含同约多笼合并写口）/ 履约核验 / 解笼拨付 / 罚没册 / 对账互证 / 审计争用 / 增补拆笼空桩（8 页，导航会话保留） |
 | 空桩 | topup（增补入笼）、split（拆笼分拨）——前后端均有 |
+| 合并口径 | 甲路径·整笔同事务（锁死，乙路径桥接影子晋升禁用）；见 `docs/multi-cage-merge-minutes.md` |
 
 ## 主链路
 
-开户入金 → 按合约入笼冻结（笼代）→ 履约核验通过 → 解笼拨付到收款方 / 违约罚没 → 笼代余额与拨付+罚没对账
+开户入金 → 按合约入笼冻结（笼代）→ 同约多笼可整笔合并为一只主笼 → 履约核验通过 → 解笼拨付到收款方 / 违约罚没 → 笼代余额与拨付+罚没对账
+
+## 多笼合并（甲路径，当日锁死）
+
+- 同一事务：作废来源笼（`已合并作废`，行保留）→ 金额累加写入主笼（笼代 +1）→ 按活笼可用合计重算账户冻结 → 写 `cage_merge` 审计与 `merge_jobs/merge_lineage` 血缘；
+- 任一步失败整笔回滚，作废与累加同滚，来源笼与账户零改（`merge_svc.FAIL_AFTER_ACCUMULATE` 故障注入由失败测守）；
+- 乙路径（桥接影子主笼→晋升）禁用：`mode=影子晋升` 或影子态笼 → 记 `merge_yaw` 审计并 409 拒写；
+- 同当事人合并抢账户锁 `bond:{party_key}`，后到只留 `contention_log` 争用痕、业务零写；
+- 五页同源：入笼/账户/对账/核验/审计共用 `LIVE_CAGE_STATUSES` 与 `live_frozen_sum`，恒等式 `bond_accounts.frozen == SUM(活笼.available)`；
+- 库路径不变（`data/app.db`），导航不增删，合并写口落在「入笼冻结」页；规则见 `docs/multi-cage-merge-minutes.md`。
 
 ## 互斥切口候选
 

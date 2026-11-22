@@ -19,15 +19,23 @@ def _next_cage_code(conn, party_key: str) -> str:
 
 
 @router.get("/api/cages")
-def list_cages(authorization: AuthHeader = None, status: str | None = None):
+def list_cages(
+    authorization: AuthHeader = None,
+    status: str | None = None,
+    contract_no: str | None = None,
+):
     require_user(authorization)
     with connect() as conn:
+        sql = "SELECT * FROM cages WHERE 1=1"
+        args: list = []
         if status:
-            rows = conn.execute(
-                "SELECT * FROM cages WHERE status=? ORDER BY id DESC", (status,)
-            ).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM cages ORDER BY id DESC").fetchall()
+            sql += " AND status=?"
+            args.append(status)
+        if contract_no:
+            sql += " AND contract_no=?"
+            args.append(contract_no)
+        sql += " ORDER BY id DESC"
+        rows = conn.execute(sql, args).fetchall()
         return {"items": [dict(r) for r in rows]}
 
 
@@ -50,11 +58,28 @@ def get_cage(cage_id: int, authorization: AuthHeader = None):
             "SELECT * FROM forfeits WHERE cage_id=? ORDER BY id DESC",
             (cage_id,),
         ).fetchall()
+        merged_out = conn.execute(
+            """SELECT l.*, j.main_cage_id, m.cage_code AS main_cage_code, j.created_at AS merged_at
+               FROM merge_lineage l
+               JOIN merge_jobs j ON j.id=l.merge_job_id
+               JOIN cages m ON m.id=j.main_cage_id
+               WHERE l.source_cage_id=? ORDER BY l.id DESC""",
+            (cage_id,),
+        ).fetchall()
+        merged_in = conn.execute(
+            """SELECT j.*, l.source_cage_code, l.amount AS source_amount
+               FROM merge_jobs j
+               JOIN merge_lineage l ON l.merge_job_id=j.id
+               WHERE j.main_cage_id=? ORDER BY j.id DESC""",
+            (cage_id,),
+        ).fetchall()
         return {
             "cage": dict(cage),
             "attestations": [dict(a) for a in atts],
             "releases": [dict(r) for r in rels],
             "forfeits": [dict(f) for f in fors],
+            "merged_out": [dict(x) for x in merged_out],
+            "merged_in": [dict(x) for x in merged_in],
         }
 
 

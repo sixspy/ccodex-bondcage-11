@@ -63,5 +63,8 @@ export function createApi(getToken, onUnauthorized) {
     splitJobs: () => req("/api/split/jobs"),
     splitStub: (data) =>
       req("/api/split-stub", { method: "POST", body: JSON.stringify(data) }),
+    mergeJobs: () => req("/api/merge/jobs"),
+    mergeCages: (data) =>
+      req("/api/cages/merge", { method: "POST", body: JSON.stringify(data) }),
   };
 }

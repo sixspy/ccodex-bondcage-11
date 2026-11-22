@@ -361,3 +361,35 @@ th {
   margin-bottom: 12px;
   font-size: 13px;
 }
+
+.cage-card.void {
+  opacity: 0.62;
+  border-style: dashed;
+  background: repeating-linear-gradient(
+    45deg,
+    #f3e7d0,
+    #f3e7d0 8px,
+    #e9dabd 8px,
+    #e9dabd 16px
+  );
+}
+.cage-card .void-tag {
+  margin-top: 6px;
+  display: inline-block;
+  border: 1px solid var(--stamp);
+  color: var(--stamp);
+  font-size: 11px;
+  padding: 1px 6px;
+}
+tr.void td {
+  color: var(--steel-soft);
+  background: #f7efdd;
+}
+.merge-group {
+  margin-bottom: 12px;
+  border: 1.5px solid var(--line);
+}
+.merge-group tfoot td {
+  background: #fff8ea;
+  font-size: 13px;
+}

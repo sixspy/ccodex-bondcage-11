@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from auth import AuthHeader, require_user, require_writer
-from db import connect, now_iso, write_audit
+from db import MERGED_VOID_STATUS, SHADOW_STATUS, connect, now_iso, write_audit
 from locks import release, require_lock
 from models import AttestIn
 
@@ -40,6 +40,10 @@ def create_attestation(body: AttestIn, authorization: AuthHeader = None):
             ).fetchone()
             if not cage:
                 raise HTTPException(404, "笼不存在")
+            if cage["status"] == MERGED_VOID_STATUS:
+                raise HTTPException(409, "笼已合并作废，禁止核验；请对主笼发起核验")
+            if cage["status"] == SHADOW_STATUS:
+                raise HTTPException(409, "影子待晋升笼未入主笼，禁止核验")
             if cage["status"] != "已冻结":
                 raise HTTPException(409, "仅已冻结笼可核验")
             if float(cage["available"]) <= 0:

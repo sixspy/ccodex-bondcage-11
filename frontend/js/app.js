@@ -48,6 +48,7 @@ createApp({
     const selectedCage = ref(null);
     const topupJobs = ref([]);
     const splitJobs = ref([]);
+    const mergeJobs = ref([]);
 
     const bondForm = ref({
       party_key: "P-NEW",
@@ -92,6 +93,8 @@ createApp({
       right_amount: 10000,
       mode: "整笔切分",
     });
+    // 多笼合并：按 当事人+合约 分组选择主笼；口径锁死为整笔同事务
+    const mergeMainByGroup = ref({});
 
     function logout() {
       token.value = "";
@@ -141,6 +144,57 @@ createApp({
         (c) => c.status === "核验违约" || c.status === "部分罚没"
       )
     );
+
+    // 可合并组：同当事人 + 同合约、全部已冻结且至少 2 只（五页同源数据）
+    const mergeGroups = computed(() => {
+      const map = new Map();
+      for (const c of cages.value) {
+        if (c.status !== "已冻结") continue;
+        const key = `${c.party_key}||${c.contract_no}`;
+        if (!map.has(key)) {
+          map.set(key, {
+            key,
+            party_key: c.party_key,
+            contract_no: c.contract_no,
+            cages: [],
+          });
+        }
+        map.get(key).cages.push(c);
+      }
+      const groups = [...map.values()]
+        .filter((g) => g.cages.length >= 2)
+        .map((g) => {
+          const sorted = [...g.cages].sort((a, b) => a.id - b.id);
+          const mainId = mergeMainByGroup.value[g.key] || sorted[0].id;
+          const main = sorted.find((c) => c.id === mainId) || sorted[0];
+          const sources = sorted.filter((c) => c.id !== main.id);
+          const total = sorted.reduce((s, c) => s + Number(c.available), 0);
+          const added = sources.reduce((s, c) => s + Number(c.available), 0);
+          return { ...g, cages: sorted, main, sources, total, added };
+        });
+      return groups;
+    });
+
+    function pickMergeMain(groupKey, cageId) {
+      mergeMainByGroup.value[groupKey] = Number(cageId);
+    }
+
+    async function mergeGroup(g) {
+      clearFlash();
+      try {
+        const row = await api.mergeCages({
+          party_key: g.party_key,
+          contract_no: g.contract_no,
+          main_cage_id: g.main.id,
+          source_cage_ids: g.sources.map((c) => c.id),
+          mode: "整笔同事务",
+        });
+        flashOk(`合并成功：${row.main_cage_code} 已承接 ${g.sources.length} 只来源笼`);
+        await refresh();
+      } catch (e) {
+        flashErr(e);
+      }
+    }
 
     async function login() {
       err.value = "";
@@ -195,6 +249,7 @@ createApp({
           lk,
           tj,
           sj,
+          mj,
         ] = await Promise.all([
           api.bonds(),
           api.cages(),
@@ -207,6 +262,7 @@ createApp({
           api.locks(),
           api.topupJobs(),
           api.splitJobs(),
+          api.mergeJobs(),
         ]);
         bonds.value = b.items || [];
         cages.value = c.items || [];
@@ -219,6 +275,7 @@ createApp({
         locks.value = lk.items || [];
         topupJobs.value = tj.items || [];
         splitJobs.value = sj.items || [];
+        mergeJobs.value = mj.items || [];
         if (!attestForm.value.cage_id && frozenCages.value.length) {
           attestForm.value.cage_id = frozenCages.value[0].id;
         }
@@ -417,6 +474,10 @@ createApp({
       selectedCage,
       topupJobs,
       splitJobs,
+      mergeJobs,
+      mergeGroups,
+      pickMergeMain,
+      mergeGroup,
       bondForm,
       depositForm,
       freezeForm,
